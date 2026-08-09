@@ -25,9 +25,17 @@ const emptyParkingForm = {
   spot_type: 'Default',
 }
 
+const emptyCommitteeForm = {
+  term_name: '',
+  start_date: '',
+  end_date: '',
+  is_active: true,
+  members: [{ resident_id: '', role: 'Member' }],
+}
+
 function getViewFromHash() {
   const hash = window.location.hash.replace('#', '')
-  return ['home', 'flats', 'residents', 'parking'].includes(hash) ? hash : 'home'
+  return ['home', 'flats', 'residents', 'parking', 'committee'].includes(hash) ? hash : 'home'
 }
 
 function App() {
@@ -35,11 +43,14 @@ function App() {
   const [flats, setFlats] = useState([])
   const [residents, setResidents] = useState([])
   const [parking, setParking] = useState([])
+  const [committees, setCommittees] = useState([])
+  const [committeeMenu, setCommitteeMenu] = useState([])
   const [health, setHealth] = useState('checking...')
   const [message, setMessage] = useState('')
   const [flatForm, setFlatForm] = useState(emptyFlatForm)
   const [residentForm, setResidentForm] = useState(emptyResidentForm)
   const [parkingForm, setParkingForm] = useState(emptyParkingForm)
+  const [committeeForm, setCommitteeForm] = useState(emptyCommitteeForm)
   const [editingFlatId, setEditingFlatId] = useState(null)
   const [editingResidentId, setEditingResidentId] = useState(null)
   const [editingParkingId, setEditingParkingId] = useState(null)
@@ -53,14 +64,18 @@ function App() {
 
   const loadData = async () => {
     try {
-      const [flatsRes, residentsRes, parkingRes] = await Promise.all([
+      const [flatsRes, residentsRes, parkingRes, committeesRes, menuRes] = await Promise.all([
         axios.get(`${API_BASE}/flats`),
         axios.get(`${API_BASE}/residents`),
         axios.get(`${API_BASE}/parking`),
+        axios.get(`${API_BASE}/committee/current`),
+        axios.get(`${API_BASE}/committee/menu`),
       ])
       setFlats(flatsRes.data)
       setResidents(residentsRes.data)
       setParking(parkingRes.data)
+      setCommittees(committeesRes.data)
+      setCommitteeMenu(menuRes.data)
       setHealth('ok')
     } catch (error) {
       setHealth('backend unavailable')
@@ -217,6 +232,37 @@ function App() {
     }
   }
 
+  const handleCommitteeSubmit = async (event) => {
+    event.preventDefault()
+    try {
+      const payload = {
+        ...committeeForm,
+        members: committeeForm.members.filter((member) => member.resident_id),
+      }
+      await axios.post(`${API_BASE}/committee`, payload)
+      setMessage('Committee created successfully.')
+      setCommitteeForm(emptyCommitteeForm)
+      await loadData()
+    } catch (error) {
+      setMessage('Failed to save committee.')
+    }
+  }
+
+  const updateCommitteeMember = (index, field, value) => {
+    const nextMembers = [...committeeForm.members]
+    nextMembers[index] = { ...nextMembers[index], [field]: value }
+    setCommitteeForm({ ...committeeForm, members: nextMembers })
+  }
+
+  const addCommitteeMember = () => {
+    setCommitteeForm({ ...committeeForm, members: [...committeeForm.members, { resident_id: '', role: 'Member' }] })
+  }
+
+  const removeCommitteeMember = (index) => {
+    const nextMembers = committeeForm.members.filter((_, memberIndex) => memberIndex !== index)
+    setCommitteeForm({ ...committeeForm, members: nextMembers })
+  }
+
   const renderNav = () => (
     <nav className="flex flex-wrap items-center gap-2 rounded-2xl border border-slate-200 bg-white p-3 shadow-sm">
       <button onClick={() => navigate('home')} className={`rounded-lg px-3 py-2 text-sm font-medium ${currentView === 'home' ? 'bg-slate-900 text-white' : 'bg-slate-100 text-slate-700'}`}>
@@ -230,6 +276,9 @@ function App() {
       </button>
       <button onClick={() => navigate('parking')} className={`rounded-lg px-3 py-2 text-sm font-medium ${currentView === 'parking' ? 'bg-slate-900 text-white' : 'bg-slate-100 text-slate-700'}`}>
         Parking
+      </button>
+      <button onClick={() => navigate('committee')} className={`rounded-lg px-3 py-2 text-sm font-medium ${currentView === 'committee' ? 'bg-slate-900 text-white' : 'bg-slate-100 text-slate-700'}`}>
+        Committee
       </button>
     </nav>
   )
@@ -265,6 +314,10 @@ function App() {
             <button onClick={() => navigate('parking')} className="rounded-2xl border border-slate-200 bg-slate-50 p-5 text-left transition hover:border-slate-400 hover:bg-white">
               <p className="text-lg font-semibold">Parking</p>
               <p className="mt-2 text-sm text-slate-600">Track default spots and extra purchased spots in the ground floor and cellar.</p>
+            </button>
+            <button onClick={() => navigate('committee')} className="rounded-2xl border border-slate-200 bg-slate-50 p-5 text-left transition hover:border-slate-400 hover:bg-white">
+              <p className="text-lg font-semibold">Committee</p>
+              <p className="mt-2 text-sm text-slate-600">Create HOA committees and assign resident members from the apartment roster.</p>
             </button>
           </div>
         )}
@@ -373,6 +426,47 @@ function App() {
                   Primary contact
                 </label>
                 <button className="rounded-xl bg-slate-900 px-4 py-2 text-white" type="submit">{editingResidentId ? 'Update resident' : 'Add resident'}</button>
+              </form>
+            </aside>
+          </div>
+        )}
+
+        {currentView === 'committee' && (
+          <div className="mt-8 grid gap-6 lg:grid-cols-[1fr_0.9fr]">
+            <section className="rounded-2xl border border-slate-200 p-5">
+              <h2 className="text-xl font-semibold">HOA committee roster</h2>
+              <div className="mt-4 space-y-3">
+                {committees.length ? committees.map((committee) => (
+                  <div key={committee.id} className="rounded-2xl border border-slate-200 p-3">
+                    <p className="font-semibold">{committee.term_name}</p>
+                    <p className="text-sm text-slate-600">{committee.start_date} to {committee.end_date} • {committee.is_active ? 'Active' : 'Inactive'}</p>
+                  </div>
+                )) : <p className="text-sm text-slate-500">No committees created yet.</p>}
+              </div>
+            </section>
+
+            <aside className="rounded-2xl border border-slate-200 p-5">
+              <h2 className="text-xl font-semibold">Create committee</h2>
+              <form onSubmit={handleCommitteeSubmit} className="mt-4 space-y-3">
+                <input className="w-full rounded-xl border border-slate-300 px-3 py-2" placeholder="Term name" value={committeeForm.term_name} onChange={(e) => setCommitteeForm({ ...committeeForm, term_name: e.target.value })} />
+                <input className="w-full rounded-xl border border-slate-300 px-3 py-2" type="date" value={committeeForm.start_date} onChange={(e) => setCommitteeForm({ ...committeeForm, start_date: e.target.value })} />
+                <input className="w-full rounded-xl border border-slate-300 px-3 py-2" type="date" value={committeeForm.end_date} onChange={(e) => setCommitteeForm({ ...committeeForm, end_date: e.target.value })} />
+                <label className="flex items-center gap-2 text-sm text-slate-600">
+                  <input type="checkbox" checked={committeeForm.is_active} onChange={(e) => setCommitteeForm({ ...committeeForm, is_active: e.target.checked })} />
+                  Active committee
+                </label>
+                {committeeForm.members.map((member, index) => (
+                  <div key={index} className="space-y-2 rounded-xl border border-slate-200 p-3">
+                    <select className="w-full rounded-xl border border-slate-300 px-3 py-2" value={member.resident_id} onChange={(e) => updateCommitteeMember(index, 'resident_id', e.target.value)}>
+                      <option value="">Select resident</option>
+                      {committeeMenu.map((option) => <option key={option.resident_id} value={option.resident_id}>{option.full_name} {option.flat_number ? `(${option.flat_number})` : ''}</option>)}
+                    </select>
+                    <input className="w-full rounded-xl border border-slate-300 px-3 py-2" placeholder="Role" value={member.role} onChange={(e) => updateCommitteeMember(index, 'role', e.target.value)} />
+                    <button type="button" className="text-sm text-red-600" onClick={() => removeCommitteeMember(index)}>Remove</button>
+                  </div>
+                ))}
+                <button type="button" className="rounded-xl border border-slate-300 px-3 py-2 text-sm" onClick={addCommitteeMember}>Add another member</button>
+                <button className="w-full rounded-xl bg-slate-900 px-4 py-2 text-white" type="submit">Create committee</button>
               </form>
             </aside>
           </div>

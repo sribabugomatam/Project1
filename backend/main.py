@@ -14,6 +14,7 @@ from schemas import (
     FlatUpdate,
     HOACommitteeCreate,
     HOACommitteeRead,
+    HOAMemberRead,
     MonthlyDuesCreate,
     MonthlyDuesRead,
     MonthlyDuesUpdate,
@@ -59,10 +60,41 @@ def get_flats(db: Session = Depends(get_db)):
     return db.query(Flat).all()
 
 
-@app.post("/api/flats", response_model=FlatRead, status_code=status.HTTP_201_CREATED)
+@app.get("/api/flats/{flat_id}/residents", response_model=list[ResidentRead])
+def get_flat_residents(flat_id: int, db: Session = Depends(get_db)):
+    flat = db.query(Flat).filter(Flat.id == flat_id).first()
+    if not flat:
+        raise HTTPException(status_code=404, detail="Flat not found")
+    return flat.residents
+
+
+@app.get("/api/flats/{flat_id}/parking", response_model=list[ParkingSpotRead])
+def get_flat_parking(flat_id: int, db: Session = Depends(get_db)):
+    flat = db.query(Flat).filter(Flat.id == flat_id).first()
+    if not flat:
+        raise HTTPException(status_code=404, detail="Flat not found")
+    return flat.parking_spots
+
+
+@app.post("/api/flats", response_model=FlatDetailRead, status_code=status.HTTP_201_CREATED)
 def create_flat(payload: FlatCreate, db: Session = Depends(get_db)):
-    flat = Flat(**payload.model_dump())
+    data = payload.model_dump(exclude={"residents", "parking_spots"})
+    flat = Flat(**data)
     db.add(flat)
+    db.flush()
+
+    for resident_payload in payload.residents or []:
+        resident_data = resident_payload.model_dump(exclude_unset=True)
+        resident_data["flat_id"] = flat.id
+        resident = Resident(**resident_data)
+        db.add(resident)
+
+    for parking_payload in payload.parking_spots or []:
+        parking_data = parking_payload.model_dump(exclude_unset=True)
+        parking_data["assigned_flat_id"] = flat.id
+        spot = ParkingSpot(**parking_data)
+        db.add(spot)
+
     db.commit()
     db.refresh(flat)
     return flat
@@ -76,14 +108,29 @@ def get_flat_detail(flat_id: int, db: Session = Depends(get_db)):
     return flat
 
 
-@app.put("/api/flats/{flat_id}", response_model=FlatRead)
+@app.put("/api/flats/{flat_id}", response_model=FlatDetailRead)
 def update_flat(flat_id: int, payload: FlatUpdate, db: Session = Depends(get_db)):
     flat = db.query(Flat).filter(Flat.id == flat_id).first()
     if not flat:
         raise HTTPException(status_code=404, detail="Flat not found")
 
-    for key, value in payload.model_dump(exclude_unset=True).items():
+    update_data = payload.model_dump(exclude={"residents", "parking_spots"}, exclude_unset=True)
+    for key, value in update_data.items():
         setattr(flat, key, value)
+
+    if payload.residents is not None:
+        db.query(Resident).filter(Resident.flat_id == flat.id).delete(synchronize_session=False)
+        for resident_payload in payload.residents:
+            resident_data = resident_payload.model_dump(exclude_unset=True)
+            resident_data["flat_id"] = flat.id
+            db.add(Resident(**resident_data))
+
+    if payload.parking_spots is not None:
+        db.query(ParkingSpot).filter(ParkingSpot.assigned_flat_id == flat.id).delete(synchronize_session=False)
+        for parking_payload in payload.parking_spots:
+            parking_data = parking_payload.model_dump(exclude_unset=True)
+            parking_data["assigned_flat_id"] = flat.id
+            db.add(ParkingSpot(**parking_data))
 
     db.commit()
     db.refresh(flat)
@@ -113,6 +160,22 @@ def delete_flat(flat_id: int, db: Session = Depends(get_db)):
 @app.get("/api/residents", response_model=list[ResidentRead])
 def get_residents(db: Session = Depends(get_db)):
     return db.query(Resident).all()
+
+
+@app.get("/api/residents/{resident_id}/flat", response_model=FlatRead)
+def get_resident_flat(resident_id: int, db: Session = Depends(get_db)):
+    resident = db.query(Resident).filter(Resident.id == resident_id).first()
+    if not resident:
+        raise HTTPException(status_code=404, detail="Resident not found")
+    return resident.flat
+
+
+@app.get("/api/residents/{resident_id}/hoa-members", response_model=list[HOAMemberRead])
+def get_resident_hoa_members(resident_id: int, db: Session = Depends(get_db)):
+    resident = db.query(Resident).filter(Resident.id == resident_id).first()
+    if not resident:
+        raise HTTPException(status_code=404, detail="Resident not found")
+    return resident.hoa_members
 
 
 @app.post("/api/residents", response_model=ResidentRead, status_code=status.HTTP_201_CREATED)
@@ -209,6 +272,14 @@ def get_active_committee(db: Session = Depends(get_db)):
     return db.query(HOACommittee).filter(HOACommittee.is_active.is_(True)).all()
 
 
+@app.get("/api/committee/{committee_id}/members", response_model=list[HOAMemberRead])
+def get_committee_members(committee_id: int, db: Session = Depends(get_db)):
+    committee = db.query(HOACommittee).filter(HOACommittee.id == committee_id).first()
+    if not committee:
+        raise HTTPException(status_code=404, detail="Committee not found")
+    return committee.members
+
+
 @app.post("/api/committee", response_model=HOACommitteeRead, status_code=status.HTTP_201_CREATED)
 def create_committee(payload: HOACommitteeCreate, db: Session = Depends(get_db)):
     committee = HOACommittee(
@@ -233,6 +304,20 @@ def create_committee(payload: HOACommitteeCreate, db: Session = Depends(get_db))
 
     db.commit()
     return committee
+
+
+@app.get("/api/committee/menu", response_model=list[dict])
+def get_committee_menu(db: Session = Depends(get_db)):
+    residents = db.query(Resident).all()
+    return [
+        {
+            "resident_id": resident.id,
+            "full_name": resident.full_name,
+            "flat_number": resident.flat.flat_number if resident.flat else None,
+            "role": resident.role,
+        }
+        for resident in residents
+    ]
 
 
 @app.get("/api/dues", response_model=list[MonthlyDuesRead])

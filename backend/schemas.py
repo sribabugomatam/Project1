@@ -13,7 +13,7 @@ class ResidentBase(BaseModel):
 
 
 class ResidentCreate(ResidentBase):
-    flat_id: int
+    flat_id: Optional[int] = None
 
 
 class ResidentUpdate(BaseModel):
@@ -63,13 +63,16 @@ class FlatBase(BaseModel):
 
 
 class FlatCreate(FlatBase):
-    pass
+    residents: Optional[List[ResidentCreate]] = None
+    parking_spots: Optional[List[ParkingSpotCreate]] = None
 
 
 class FlatUpdate(BaseModel):
     flat_number: Optional[str] = None
     floor_number: Optional[int] = None
     status: Optional[str] = None
+    residents: Optional[List[ResidentCreate]] = None
+    parking_spots: Optional[List[ParkingSpotCreate]] = None
 
 
 class FlatRead(FlatBase):
@@ -97,6 +100,18 @@ class HOACommitteeCreate(HOACommitteeBase):
 
 
 class HOACommitteeRead(HOACommitteeBase):
+    id: int
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class HOAMemberBase(BaseModel):
+    committee_id: int
+    resident_id: int
+    role: str
+
+
+class HOAMemberRead(HOAMemberBase):
     id: int
 
     model_config = ConfigDict(from_attributes=True)
